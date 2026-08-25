@@ -1,0 +1,5 @@
+.venv/
+.env
+agent.log
+games/
+__pycache__/
