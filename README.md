@@ -6,15 +6,34 @@ Competition closes **August 29, 2026 (AoE)**.
 
 ## Run
 
+**Production runs on xhostd** (account `matanrich`, app `glee-agent`, channel `prod`,
+app id `7a5749ea-b55c-419d-980d-9cf107018363`) as an always-on background worker —
+no local machine needed. Deploys are git-push driven:
+
+```bash
+git push xhost HEAD:master
+curl -s -X POST https://api.xhostd.com/apps/<app-id>/channels/<channel-id>/deploy \
+  -H "Authorization: Bearer $XHOST_TOKEN" -H "Content-Type: application/json" \
+  -d '{"ref":"master"}'
+```
+
+`GLEE_API_KEY` is a platform secret (set via the env API, never committed); the
+`XHOST_TOKEN` deploy token lives in `.env` alongside it. `install.sh` installs the
+SDK at image build; `launch.sh` starts the worker; `agent.py` touches
+`$XHOST_READY_FILE` after the key validates so the no-HTTP health check passes.
+Read the live log with `POST .../runtime/log` (`{"command": "tail -50 app.log"}`).
+
+Local fallback (never run both at once — they contend for the same 60 req/min):
+
 ```bash
 ./run.sh          # starts agent.py in the background, logs to agent.log
 tail -f agent.log
 ```
 
-The API key lives in `.env` (not committed anywhere). A lost key can be reset from
-the dashboard card (invalidates the old one immediately).
+A lost GLEE key can be reset from the dashboard card (invalidates the old one
+immediately).
 
-**Keep it running until the close.** The machine must stay awake:
+**Keep it running until the close:**
 
 - Ratings above 1800 (raw) decay unless the agent plays 100 games/family per 48h.
 - Top-100 agents must play ≥10 games/day per family (1 rating point per missing game).
