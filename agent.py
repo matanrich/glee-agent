@@ -155,10 +155,9 @@ def bargaining_strategy(game):
         )
         ladder = [0.90, 0.75, 0.60, 0.50]
         tgt = targets[ladder[min(rejections, 3)]]
-        share = (tgt / disc) / money if money else 0.5
-        # discounting inflates late-round nominal demands past anything the
-        # pool's opponents ever accept — cap near the pool's top settlements
-        share = min(share, (targets[0.90] / money) + 0.08 if money else 0.8, 0.80)
+        # pool settlements are mostly rounds 1-2, so quantile payoffs read as
+        # nominal shares; inflating the demand by /disc only fuels standoffs
+        share = tgt / money if money else 0.5
         if max_rounds is not None and r == max_rounds:
             share = 1.0 - REJECT_FLOOR - 0.03
         share = _clamp(share, 0.45, 0.85)
@@ -190,7 +189,16 @@ def bargaining_strategy(game):
             lvl = 0.25
         else:
             lvl = 0.10
-        if my_now >= targets[lvl] and my_now > 0:
+        # Pool quantiles were earned by settling early; once inflation has
+        # eaten the pie they can exceed everything still achievable, and a
+        # bar nothing clears means no-deal at the cap. The offer only has to
+        # beat what continuing can still realistically deliver.
+        cont_share = _proposer_share(r + 1, r + 1, True, max_rounds, d_me, d_opp)
+        continuation = (d_me ** r) * cont_share * money
+        # equilibrium continuation assumes the opponent accepts equilibrium
+        # offers; the field demonstrably doesn't, so haircut it hard
+        thr = min(targets[lvl], 0.80 * continuation)
+        if my_now >= thr and my_now > 0:
             return {"decision": "accept"}
         if r > 20 and my_now > 0:
             return {"decision": "accept"}  # deep in the hidden-cap zone

@@ -265,6 +265,18 @@ g["game_state"]["money_to_divide"] = 100.5
 a = agent.strategy(g)
 results.append(check("fractional sum exact", round(a["alice_gain"] + a["bob_gain"], 2) == 100.5, str(a)))
 
+
+# ---- bargaining: heavy inflation must not create a bar nothing clears (Alice, hidden d2)
+g = make("bargaining", "player_1", "decision", {
+    "money_to_divide": 10000, "round": 3, "max_rounds": 12, "horizon_known": True,
+    "delta_1": 0.8, "current_player": "player_1", "history": [],
+    "last_offer": {"player_1_gain": 4200, "player_2_gain": 5800,
+                   "proposer": "player_2", "round": 3},
+}, fields={"decision": {}})
+a = run(g)
+results.append(check("bg inflated-away pie accepts continuation-beating offer",
+                     a == {"decision": "accept"}, str(a)))
+
 print()
 failed = results.count(False)
 print(f"{len(results) - failed}/{len(results)} passed")
