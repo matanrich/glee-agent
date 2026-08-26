@@ -18,22 +18,41 @@ with open("agent.log") as f:
         m = re.search(r"Game ([0-9a-f-]{36})", line)
         if m:
             ids.add(m.group(1))
+# ids exported from the cloud worker's runtime log (see README)
+if os.path.exists("cloud_ids.txt"):
+    with open("cloud_ids.txt") as f:
+        cloud = {ln.strip() for ln in f if re.fullmatch(r"[0-9a-f-]{36}", ln.strip())}
+    ids |= cloud
+else:
+    cloud = set()
 
+failures = 0
 for gid in sorted(ids):
     path = f"games/{gid}.json"
     if os.path.exists(path):
         continue
-    r = requests.get(API + gid, headers={"Authorization": f"Bearer {KEY}"}, timeout=30)
+    try:
+        r = requests.get(API + gid, headers={"Authorization": f"Bearer {KEY}"}, timeout=30)
+    except requests.RequestException as e:
+        failures += 1
+        print(f"fetch failed for {gid[:8]}: {e.__class__.__name__}; continuing")
+        time.sleep(10)
+        continue
     if r.status_code == 429:
         time.sleep(float(r.headers.get("Retry-After", 10)))
         continue
-    r.raise_for_status()
+    if not r.ok:
+        failures += 1
+        time.sleep(5)
+        continue
     g = r.json()
     if g.get("status") == "active":
         continue  # don't cache unfinished games
     with open(path, "w") as f:
         f.write(r.text)
     time.sleep(2)  # stay far under the rate limit shared with the live agent
+if failures:
+    print(f"note: {failures} fetches failed and were skipped this run\n")
 
 games = []
 for fn in os.listdir("games"):
@@ -42,7 +61,37 @@ for fn in os.listdir("games"):
     if g.get("status") != "active":
         games.append(g)
 
-print(f"{len(games)} completed games\n")
+print(f"{len(games)} completed games "
+      f"({sum(1 for g in games if g['game_id'] in cloud)} from the cloud era)\n")
+
+
+def bucket(g):
+    """cloud-era games ran with every strategy fix deployed."""
+    return "post" if g["game_id"] in cloud else "pre"
+
+
+for era in ("pre", "post"):
+    sub = [g for g in games if bucket(g) == era]
+    if not sub:
+        continue
+    agg = {}
+    for g in sub:
+        me = g["your_player"]
+        res = g.get("result") or {}
+        mine = res.get(f"{me}_payoff")
+        opp = res.get(f"{'player_2' if me == 'player_1' else 'player_1'}_payoff")
+        fam = g["game_family"]
+        a = agg.setdefault(fam, {"n": 0, "deals": 0, "shares": []})
+        a["n"] += 1
+        if res.get("outcome") != "no_deal":
+            a["deals"] += 1
+        if mine is not None and opp is not None and (mine + opp) > 0:
+            a["shares"].append(mine / (mine + opp))
+    print(f"[{era}-fix era]")
+    for fam, a in sorted(agg.items()):
+        sh = sum(a["shares"]) / len(a["shares"]) if a["shares"] else float("nan")
+        print(f"  {fam:12s} n={a['n']:3d} deal-rate={a['deals']/a['n']:.2f} my-share={sh:.2f}")
+print()
 
 rows = {}
 for g in games:

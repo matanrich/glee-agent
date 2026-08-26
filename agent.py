@@ -19,6 +19,11 @@ from pathlib import Path
 
 from glee_sdk import CompetitionClosedError, CompetitionNotOpenError, GleeClient
 
+try:
+    import pool as pool_targets
+except Exception:  # missing/corrupt quantile file must never take the agent down
+    pool_targets = None
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(name)s %(message)s",
@@ -117,6 +122,15 @@ def _proposer_share(round_k, cur_round, i_propose_now, max_rounds, d_me, d_opp):
     return _clamp(1.0 - d_resp * nxt, 0.1, 0.9)
 
 
+def _bg_pool_targets(game):
+    if pool_targets is None:
+        return None
+    try:
+        return pool_targets.bargaining_targets(game)
+    except Exception:
+        return None
+
+
 def bargaining_strategy(game):
     s = game["game_state"]
     va = game["valid_actions"]
@@ -127,6 +141,60 @@ def bargaining_strategy(game):
     d_me, d_opp = _bg_deltas(game)
     my_offer_key = "alice_gain" if me == "player_1" else "bob_gain"
     opp_offer_key = "bob_gain" if me == "player_1" else "alice_gain"
+    targets = _bg_pool_targets(game)
+    disc = d_me ** (r - 1)
+
+    if va["type"] == "offer" and targets:
+        # Aim where the reference pool pays: p90 payoff first, conceding one
+        # quantile per rejection of my own offers. Payoffs are discounted, so
+        # the nominal demand that still HITS the target grows as rounds pass —
+        # which is exactly the pressure to settle early.
+        rejections = sum(
+            1 for h in (s.get("history") or [])
+            if h.get("proposer") == me and (h.get("decision") or "") == "reject"
+        )
+        ladder = [0.90, 0.75, 0.60, 0.50]
+        tgt = targets[ladder[min(rejections, 3)]]
+        share = (tgt / disc) / money if money else 0.5
+        # discounting inflates late-round nominal demands past anything the
+        # pool's opponents ever accept — cap near the pool's top settlements
+        share = min(share, (targets[0.90] / money) + 0.08 if money else 0.8, 0.80)
+        if max_rounds is not None and r == max_rounds:
+            share = 1.0 - REJECT_FLOOR - 0.03
+        share = _clamp(share, 0.45, 0.85)
+        mine, theirs = _money_pair(share * money, money)
+        pct = round(100 * mine / money)
+        return _finalize({
+            my_offer_key: mine,
+            opp_offer_key: theirs,
+            "message": (
+                f"Proposing {pct}/{100 - pct}. Every round of delay shrinks the pie "
+                "for both of us - locking this in now beats a smaller split later."
+            ),
+        }, game)
+
+    if va["type"] == "decision" and targets:
+        offer = s.get("last_offer") or {}
+        my_now = float(offer.get(f"{me}_gain") or 0.0) * disc
+        if max_rounds is not None and r >= max_rounds:
+            return {"decision": "accept"}
+        if r <= 2:
+            lvl = 0.75
+        elif r <= 4:
+            lvl = 0.60
+        elif r <= 6:
+            lvl = 0.50
+        elif r <= 9:
+            lvl = 0.40
+        elif r <= 14:
+            lvl = 0.25
+        else:
+            lvl = 0.10
+        if my_now >= targets[lvl] and my_now > 0:
+            return {"decision": "accept"}
+        if r > 20 and my_now > 0:
+            return {"decision": "accept"}  # deep in the hidden-cap zone
+        return {"decision": "reject"}
 
     if va["type"] == "offer":
         share = _proposer_share(r, r, True, max_rounds, d_me, d_opp)
@@ -201,6 +269,15 @@ def _neg_price(x, my_value):
     return round(x, 2)
 
 
+def _neg_pool_targets(game):
+    if pool_targets is None:
+        return None
+    try:
+        return pool_targets.negotiation_targets(game)
+    except Exception:
+        return None
+
+
 def negotiation_strategy(game):
     s = game["game_state"]
     va = game["valid_actions"]
@@ -210,6 +287,72 @@ def negotiation_strategy(game):
     r = int(s.get("round") or 1)
     max_rounds = s.get("max_rounds") if s.get("horizon_known") else None
     bounds = _prompt_bounds(game.get("prompt"))
+    targets = _neg_pool_targets(game)
+
+    if targets:
+        horizon = max_rounds if max_rounds is not None else 99
+        prog = _clamp((r - 1) / max(horizon - 1, 1), 0.0, 1.0)
+        if prog < 0.2:
+            lvl, offer_lvl = 0.75, 0.90
+        elif prog < 0.45:
+            lvl, offer_lvl = 0.60, 0.75
+        elif prog < 0.7:
+            lvl, offer_lvl = 0.50, 0.60
+        elif prog < 0.9:
+            lvl, offer_lvl = 0.40, 0.50
+        else:
+            lvl, offer_lvl = 0.25, 0.40
+
+        def aspiration(q):
+            # positive-outcome quantiles: what a DEAL pays, undiluted by
+            # impossible-trade configs where the whole pool scores 0
+            return max(targets.get(("pos", q), targets[q]), 0.0)
+
+        def price_for(profit):
+            return V + profit if role == "seller" else V - profit
+
+        if va["type"] == "offer":
+            price = price_for(aspiration(offer_lvl))
+            if bounds:
+                lo, hi = bounds
+                if role == "seller":
+                    # never open below the uniform-buyer optimum
+                    price = _clamp(max(price, (hi + V) / 2.0), lo, hi * 0.98)
+                else:
+                    price = _clamp(min(price, (lo + V) / 2.0), lo * 1.02, hi)
+            return {
+                "product_price": _neg_price(price, V),
+                "message": (
+                    "Serious offer - priced so we both come out ahead. "
+                    "I can move a little, but this is the right neighborhood."
+                ),
+            }
+
+        offer_price = float((s.get("last_offer") or {}).get("price") or 0.0)
+        profit_now = (offer_price - V) if role == "seller" else (V - offer_price)
+        last_round = max_rounds is not None and r >= max_rounds
+        if last_round:
+            if profit_now > 0:
+                return {"decision": "AcceptOffer"}
+            return {"decision": "RejectOffer"}
+        thr = aspiration(lvl)
+        if bounds:
+            surplus = (bounds[1] - V) if role == "seller" else (V - bounds[0])
+            thr = max(thr, (1.0 - prog) * 0.25 * max(surplus, 0.0))
+        if profit_now > 0 and profit_now >= thr:
+            return {"decision": "AcceptOffer"}
+        if r > 60 and profit_now > 0:
+            return {"decision": "AcceptOffer"}  # hidden-cap insurance
+        counter = price_for(aspiration(offer_lvl))
+        if role == "seller":
+            counter = max(counter, offer_price * 1.02, V * 1.01)
+        else:
+            counter = max(min(counter, offer_price * 0.98, V * 0.99), 0.0)
+        return {
+            "decision": "RejectOffer",
+            "product_price": _neg_price(counter, V),
+            "message": "Close, but not there yet - here's a number that works for me.",
+        }
 
     if role == "seller":
         hi = bounds[1] if bounds else V * 2.5
