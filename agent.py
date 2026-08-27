@@ -196,8 +196,14 @@ def bargaining_strategy(game):
         cont_share = _proposer_share(r + 1, r + 1, True, max_rounds, d_me, d_opp)
         continuation = (d_me ** r) * cont_share * money
         # equilibrium continuation assumes the opponent accepts equilibrium
-        # offers; the field demonstrably doesn't, so haircut it hard
+        # offers; the field demonstrably doesn't, so haircut it hard — and
+        # floor the bar at the pool's low quantiles so a degenerate
+        # continuation (delta=1 parity chains) can't talk us into lowballs
         thr = min(targets[lvl], 0.80 * continuation)
+        if r <= 6:
+            thr = max(thr, targets[0.25])
+        elif r <= 14:
+            thr = max(thr, targets[0.10])
         if my_now >= thr and my_now > 0:
             return {"decision": "accept"}
         if r > 20 and my_now > 0:

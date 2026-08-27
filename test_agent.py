@@ -277,6 +277,22 @@ a = run(g)
 results.append(check("bg inflated-away pie accepts continuation-beating offer",
                      a == {"decision": "accept"}, str(a)))
 
+
+# ---- bargaining: inflation-immune Alice must not take a p<25 lowball early
+g = make("bargaining", "player_1", "decision", {
+    "money_to_divide": 100, "round": 2, "max_rounds": 12, "horizon_known": True,
+    "delta_1": 1.0, "current_player": "player_1", "history": [],
+    "last_offer": {"player_1_gain": 40, "player_2_gain": 60,
+                   "proposer": "player_2", "round": 2},
+}, fields={"decision": {}})
+a = run(g)
+results.append(check("bg immune Alice rejects early lowball", a == {"decision": "reject"}, str(a)))
+
+g["game_state"]["last_offer"]["player_1_gain"] = 52
+g["game_state"]["last_offer"]["player_2_gain"] = 48
+a = run(g)
+results.append(check("bg immune Alice takes a fair-plus split", a == {"decision": "accept"}, str(a)))
+
 print()
 failed = results.count(False)
 print(f"{len(results) - failed}/{len(results)} passed")
