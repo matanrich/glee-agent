@@ -1,0 +1,253 @@
+\documentclass{article}
+
+% Compile inside the official NeurIPS 2026 template project (e.g. on Overleaf):
+% this file expects neurips_2026.sty next to it. Use the "final" option for
+% the camera-ready; competition papers are single-blind, so author names stay.
+\usepackage[final]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{graphicx}
+\usepackage{microtype}
+
+\title{Percentile Targeting Beats Equilibrium Play:\\a Rule-Based Agent for
+Language-Based Economic Games}
+
+\author{%
+  Matan Fchima\\
+  xSparX\\
+  \texttt{matan@xsparx.io}\\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We describe \textbf{Equilibrist} (GLEE agent \texttt{d29d57fd038c}), a fully
+rule-based agent --- no LLM in the decision loop --- that reached the top
+quintile of the GLEE Competition leaderboard against a field dominated by
+LLM-driven agents. Its central design decision follows from the competition's
+scoring rule: each game is scored as the \emph{payoff percentile within its
+exact configuration and role}, seeded by the public GLEE research dataset.
+This turns the competition from a sequence of economic games into a
+distribution-targeting problem. We embed per-configuration payoff quantiles
+computed from 77{,}467 published GLEE games directly into the agent and aim
+each offer and acceptance decision at an explicit percentile target. We report
+three behavioral case studies in which classical equilibrium reasoning was
+measurably wrong for this objective --- including a backward-induction parity
+artifact that talked an inflation-immune player into round-two lowballs ---
+and describe the transcript-level instrumentation that caught each failure
+within hours. Our development loop, per-configuration percentile scoring of
+the agent's own games against the reference pool, doubles as the behavior
+analysis the paper track asks for.
+\end{abstract}
+
+\section{Introduction}
+
+GLEE~\citep{shapira2024glee} evaluates agents in three families of two-player
+language-based economic games --- bargaining, negotiation, and persuasion ---
+across a grid of 960 configurations (stakes, discount factors, horizons,
+information conditions). The 2026 competition matches agents and humans in a
+shared pool and ranks each account by a rating derived from per-game scores.
+
+Most competitive entries wrap a large language model around the game state.
+We took the opposite bet: a small, fully deterministic rule-based agent whose
+every move computes in microseconds. The bet was motivated by three
+observations. First, the published GLEE results themselves document systematic
+strategic weaknesses of LLM players (fairness anchoring, premature acceptance,
+poor discounting arithmetic), so the marginal value of language understanding
+is smallest exactly where the payoffs are decided. Second, a rule-based agent
+never times out, never emits an unparsable action, and costs nothing to run at
+the volume the rating system demands. Third --- the observation this paper is
+about --- the scoring rule rewards something subtly different from playing the
+games well, and a deterministic agent can optimize for it directly.
+
+\section{The scoring rule is the game}
+\label{sec:scoring}
+
+After each game, the platform converts the agent's payoff into a percentile
+against every payoff earned \emph{on the same configuration in the same role},
+a pool seeded by the GLEE research dataset and joined by competition games as
+they are played; an opponent-strength adjustment is applied on top. The
+percentile maps linearly onto a game rating, and the account rating is an
+exponential moving average of game ratings.
+
+The objective is therefore not ``maximize expected payoff'' and certainly not
+``play the subgame-perfect equilibrium''; it is \textbf{land high in an
+empirical payoff distribution generated mostly by LLM players}. We
+operationalized this directly. From the public dataset
+(77{,}467 games, all three families) we computed, for every configuration and
+role, the payoff quantiles $q_{10},q_{25},q_{40},q_{50},q_{60},q_{75},q_{90}$,
+plus positive-outcome-conditional variants. The agent ships this table
+($\sim$650\,KB of JSON) and matches each live game to it on every
+configuration field its (information-filtered) view exposes, aggregating over
+hidden fields weighted by pool size.
+
+Decisions then reference the targets explicitly. In bargaining, the opening
+demand is the nominal share whose payoff equals $q_{90}$, conceding one
+quantile per rejection; an incoming offer is accepted when its
+\emph{discounted} value clears a declining quantile ladder ($q_{75}$ in rounds
+1--2 down to $q_{10}$ by round 14), bounded by a haircut equilibrium
+continuation value (Section~\ref{sec:cases}). In negotiation, aspiration
+levels use positive-outcome quantiles so configurations where trade is
+impossible (and the whole pool scores zero) cannot dilute the target, blended
+with a take-it-or-leave-it optimum $(\,\overline{b}+v\,)/2$ when the prompt
+states the opponent's valuation range. Persuasion needs no quantile table: the
+buyer computes exact posteriors (Section~\ref{sec:cases}), and the seller
+plays honest signaling with a defection window sized by what a lie risks,
+$\textit{rounds left} \times p < 1.5$ expected remaining high-quality sales.
+
+\section{What the data taught us: three case studies}
+\label{sec:cases}
+
+Our development loop was: play a few hundred games, fetch the transcripts,
+score every game against the dataset pools, and read the worst configuration
+clusters. Each fix below was found this way, within hours of being deployed.
+
+\textbf{(1) Weak-side equilibrium play is a percentile disaster.}
+In bargaining configurations where the opponent is inflation-immune
+($\delta_{\mathrm{opp}}{=}1$) Rubinstein logic assigns the impatient player a
+small share, and our first agent dutifully demanded 35\% and settled low
+--- scoring at the 25th percentile. The pool tells a different story: the
+median dataset player in those configurations still secures $\approx$47--50\%
+of the pie, because LLM opponents accept fair splits regardless of leverage.
+Fairness-anchored demands raised the same games to above-median scores.
+The theory was not wrong about the equilibrium; it was wrong about the
+population.
+
+\textbf{(2) A backward-induction parity artifact.}
+Our acceptance rule compared offers to $0.8\times$ the equilibrium
+continuation value. With \emph{both} discount factors at 1.0 and a known even
+horizon, finite-horizon induction degenerates into an alternating
+last-proposer-takes-all chain, valuing the responder's continuation at
+$\approx$10\% of the pie --- so the agent, holding the strongest seat in the
+game, accepted 40/100 splits in round two (5th percentile;
+Figure~\ref{fig:alice}). No opponent in the pool actually plays the parity
+chain. The fix floors the acceptance bar at the pool's $q_{25}$ for the first
+six rounds and $q_{10}$ through round 14: empirical quantiles bound what
+theory may talk the agent into, while late rounds stay unrestricted so
+deadlocks still resolve.
+
+\textbf{(3) Known priors must not be updated.}
+Our first persuasion buyer treated bad purchases as evidence and abandoned
+positive-EV streams after unlucky draws --- in one game leaving an expected
+$+6.7$M on the table after a single loss. But product quality is i.i.d.\ with
+a \emph{known} prior $p$: when a seller always recommends, the message carries
+zero information and the posterior is exactly $p$; outcomes are evidence only
+about the seller's \emph{signaling policy}. The corrected buyer updates only
+on sellers who discriminate (sometimes say no), estimating
+$P(\mathrm{high}\mid \mathrm{yes})$ from purchase-verified outcomes, and
+otherwise buys the prior. Sellers are typed symmetrically: a buyer who
+purchases after a negative signal is ignoring messages, and honest
+discrimination toward them only forfeits sales.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figs/alice.png}
+  \caption{Mean payoff percentile (vs.\ the dataset pools) of bargaining as
+  player~1 across three code generations, with player~2 under identical code
+  as control. Quantile targeting v1 replaced a mediocre equilibrium baseline
+  with a catastrophic no-deal spiral (offers were compared to quantiles
+  achievable only by settling early); restoring a continuation bound traded it
+  for the parity lowball bug of Section~\ref{sec:cases}. Each regression was
+  localized to player~1 --- the side that both opens and faces the horizon
+  parity --- while player~2 held above 0.57 throughout.}
+  \label{fig:alice}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.82\linewidth]{figs/trajectory.png}
+  \caption{Competition rating per family against games played. The agent
+  entered late (day 25 of 29) and reached the top quintile of 241 agent
+  accounts in under three days of play; the negotiation spike and partial
+  give-back around 5{,}700 games reflect the quantile-targeting deploy
+  followed by field-wide pool compression as competition games join the
+  reference distribution.}
+  \label{fig:traj}
+\end{figure}
+
+\section{Agent behavior analysis}
+\label{sec:analysis}
+
+\textbf{Does the behavior match the design?} We verify alignment by
+construction and by measurement. By construction: the agent is deterministic,
+so a 34-case offline suite pins the intended behavior at decision boundaries
+(final-round ultimatums, exact-sum splits, loss refusal, lowball floors,
+belief non-updating for non-discriminating sellers), and every live decision
+point is reproducible from the archived game state. By measurement: the same
+percentile pipeline that drives development scores every completed game
+against the reference pool, per configuration and role, so ``is it doing what
+we designed'' reduces to reading per-cluster percentiles. This
+instrumentation is how each regression in Section~\ref{sec:cases} was caught
+within hours --- including one (Figure~\ref{fig:alice}) where the aggregate
+family rating was still \emph{rising} while player~1's percentile had
+collapsed to 0.07, masked by the other role's gains.
+
+\textbf{Safety and liveness.} Moves are filtered against the server's
+per-move field schema; splits are exact-sum by construction; a per-decision
+retry ladder degrades to a guaranteed-valid move so the five-invalid-move
+forfeit is unreachable. Across $>$37{,}000 completed games the agent submitted
+\textbf{zero} invalid moves and forfeited no game by timeout. A supervisor
+loop restarts the client on transport errors; abandoned-game penalties (scored
+at the 5th percentile) were never incurred after deployment.
+
+\textbf{Observed limits of the design.} Two behaviors depart from what we
+intended. First, ratings are non-stationary: because competition games join
+the reference pool, the same play earns less over time --- our negotiation
+rating gave back $\sim$270 points overnight with unchanged code and unchanged
+percentile-vs-dataset scores, i.e.\ the field moved, not the agent. Second,
+messages are nearly inert: templated offers with verifiable track-record
+claims (``of the 7 you bought on my word, 7 were high quality'') did not
+measurably move stonewalling persuasion buyers, suggesting the message channel
+matters less than the numeric channel against the current field.
+
+\section{Development process, limitations, and reproducibility}
+
+The agent was developed in $\sim$3 days against the live competition: an
+equilibrium-flavored rule-based baseline first, then five transcript-driven
+strategy revisions, then the quantile-targeting rewrite, deployed continuously
+on an always-on worker. Negative results worth recording: LLM-in-the-loop play
+was rejected on cost, latency, and the published evidence of LLM strategic
+weaknesses; equilibrium continuation values required both an empirical haircut
+and empirical floors before they were safe to use; and persuasive message
+crafting showed no measurable effect.
+
+Limitations: percentile targets inherit the reference pool's biases and decay
+in accuracy as the live pool drifts from the dataset; hidden-parameter
+aggregation (weighting by pool size) is a heuristic; and the agent does not
+model individual opponents beyond within-game signals. Reproducibility: the
+strategy is $\sim$700 lines of dependency-light Python over the public
+\texttt{glee-sdk}, the quantile table is derived from the public GLEE dataset
+by a $\sim$100-line script, and both the offline test suite and the
+percentile-scoring pipeline are deterministic given the archived transcripts.
+
+\subsubsection*{Disclosure of LLM assistance}
+
+In line with the NeurIPS LLM policy: the agent's code, the analysis pipeline,
+and the initial draft of this paper were produced with substantial assistance
+from an LLM coding assistant (Claude, Anthropic), directed and reviewed by the
+author, who takes full responsibility for the content. No LLM is used by the
+agent at play time.
+
+\begin{thebibliography}{1}
+
+\bibitem{shapira2024glee}
+E.~Shapira, O.~Madmon, R.~Reichart, and M.~Tennenholtz.
+\newblock {GLEE}: A framework and benchmark for {LLM} evaluation in
+  language-based economics.
+\newblock \emph{arXiv:2410.05254}, 2024.
+
+\bibitem{rubinstein1982}
+A.~Rubinstein.
+\newblock Perfect equilibrium in a bargaining model.
+\newblock \emph{Econometrica}, 50(1):97--109, 1982.
+
+\end{thebibliography}
+
+\end{document}
