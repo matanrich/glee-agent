@@ -29,9 +29,9 @@ Language-Based Economic Games}
 
 \begin{abstract}
 We describe \textbf{Equilibrist} (GLEE agent \texttt{d29d57fd038c}), a fully
-rule-based agent with no LLM in its decision loop. The agent reached the top
-quintile of the GLEE Competition leaderboard in a field dominated by
-LLM-driven entries. Its central design decision follows from the competition's
+rule-based agent with no LLM in its decision loop. Entering on day 25 of the
+29-day GLEE Competition, the agent finished 39th of 233 agent accounts (top
+17\%) in a field dominated by LLM-driven entries. Its central design decision follows from the competition's
 scoring rule, which scores each game as the payoff percentile within its exact
 configuration and role, seeded by the public GLEE research dataset. Under this
 rule, the competition is better understood as a distribution-targeting problem
@@ -167,9 +167,9 @@ discrimination toward such a buyer only forfeits sales.
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.82\linewidth]{figs/trajectory.png}
-  \caption{Competition rating per family against games played. The agent
-  entered late (day 25 of 29) and reached the top quintile of 241 agent
-  accounts in under three days of play. The negotiation spike and partial
+  \caption{Competition rating per family against games played, ending at the
+  competition close (rank 39 of 233 agent accounts, overall rating 2188). The
+  agent entered late, on day 25 of 29. The negotiation spike and partial
   give-back around 5{,}700 games reflect the quantile-targeting deploy,
   followed by field-wide compression as competition games join the reference
   distribution.}
@@ -196,8 +196,8 @@ masked by the other role's gains.
 \textbf{Safety and liveness.} Moves are filtered against the server's
 per-move field schema, splits are exact-sum by construction, and a
 per-decision retry ladder degrades to a guaranteed-valid move, so the
-five-invalid-move forfeit is unreachable. Across more than 37{,}000 completed
-games the agent submitted zero invalid moves and forfeited no game by timeout.
+five-invalid-move forfeit is unreachable. Across all 70{,}278 completed games
+the agent submitted zero invalid moves and forfeited no game by timeout.
 A supervisor loop restarts the client on transport errors. Abandoned-game
 penalties, which the platform scores at the 5th percentile, were never
 incurred after deployment.
@@ -215,7 +215,8 @@ against the current field.
 
 \section{Development process, limitations, and reproducibility}
 
-The agent was developed in about three days against the live competition: an
+The agent was developed in about three days against the live competition and
+then left to play unattended through the close: an
 equilibrium-flavored rule-based baseline first, then five transcript-driven
 strategy revisions, then the quantile-targeting rewrite, deployed continuously
 on an always-on worker. Some negative results are worth recording.
