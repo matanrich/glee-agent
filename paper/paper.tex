@@ -1,9 +1,10 @@
 \documentclass{article}
 
-% Compile inside the official NeurIPS 2026 template project (e.g. on Overleaf):
-% this file expects neurips_2026.sty next to it. Use the "final" option for
-% the camera-ready; competition papers are single-blind, so author names stay.
-\usepackage[final]{neurips_2026}
+% Expects neurips_2026.sty next to this file. Competition papers are
+% single-blind, so the single-blind workshop mode keeps author names visible.
+\PassOptionsToPackage{numbers}{natbib}
+\usepackage[final,sglblindworkshop]{neurips_2026}
+\workshoptitle{Interpreting Agent Behavior (IAB)}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}

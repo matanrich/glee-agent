@@ -3,3 +3,5 @@
 agent.log
 games/
 __pycache__/
+paper/paper.log
+paper/paper.xdv
