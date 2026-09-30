@@ -5,3 +5,5 @@ games/
 __pycache__/
 paper/paper.log
 paper/paper.xdv
+analysis/pool.pkl
+analysis/out/
