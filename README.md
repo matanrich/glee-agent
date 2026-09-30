@@ -89,3 +89,27 @@ all no-deal games:
 ```bash
 set -a; source .env; set +a; .venv/bin/python analyze.py
 ```
+
+## Paper
+
+`paper/` holds the IAB (NeurIPS 2026) competition paper, *Targeting the Percentile, Not
+the Equilibrium*, as LaTeX plus the compiled PDF and figures. Build with
+`cd paper && tectonic -X compile paper.tex` (the NeurIPS 2026 style file is included).
+
+## Reproducing the analysis
+
+The competition scores each game as a payoff percentile within its configuration and
+role, seeded by the public GLEE dataset. `analysis/` rebuilds that reference pool and
+scores this agent's own games against it, per code era:
+
+```bash
+git clone --filter=blob:none --depth 1 https://github.com/eilamshapira/GLEE.git /tmp/GLEE
+python analysis/build_pool.py /tmp/GLEE analysis/pool.pkl        # 77,467 dataset games
+python analysis/history_eras.py analysis/history.jsonl           # official rating deltas by era
+python analysis/matched_comparison.py                             # configuration-matched percentiles
+```
+
+`analysis/history.jsonl` is the agent's full game history exported from the platform
+dashboard (one JSON object per game); transcripts for scoring are fetched into `games/`
+with `analysis/fetch_era_transcripts.py`. Computed outputs used in the paper are checked
+in under `analysis/results/`.

@@ -8,3 +8,7 @@ paper/paper.xdv
 analysis/pool.pkl
 analysis/out/
 analysis/history.jsonl
+analysis_out.txt
+paper/figs/*.b64
+paper/*.log
+paper/*.xdv
