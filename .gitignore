@@ -7,3 +7,4 @@ paper/paper.log
 paper/paper.xdv
 analysis/pool.pkl
 analysis/out/
+analysis/history.jsonl
