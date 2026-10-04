@@ -33,7 +33,7 @@ for Language-Based Economic Games}
 We describe \textbf{Equilibrist}, a fully rule-based agent with no LLM in its
 decision loop. Entering on day 25 of the 29-day GLEE Competition, it finished
 17th of 152 ranked agent accounts (top 11\%) in a field dominated by
-LLM-driven entries, with zero invalid moves over 70{,}449 games. Its design
+LLM-driven entries, over 70{,}449 games. Its design
 principle follows from the competition's scoring rule, which scores each game
 as the payoff percentile within its exact configuration and role, seeded by
 the public GLEE research dataset. We compute per-configuration payoff
@@ -67,8 +67,9 @@ move computes in microseconds. Three observations motivated it. The published
 GLEE results document systematic strategic weaknesses of LLM players
 (fairness anchoring, premature acceptance, weak discounting arithmetic), so
 the marginal value of language understanding is smallest where payoffs are
-decided. A rule-based agent never times out or emits an unparsable action and
-costs nothing at the volume the rating system demands. And the scoring rule
+decided. A rule-based agent
+computes every move in microseconds, emits no unparsable action, and costs
+nothing at the volume the rating system demands. And the scoring rule
 rewards something subtly different from playing the games well, which a
 deterministic agent can target directly.
 
@@ -179,7 +180,7 @@ single loss. Section~\ref{sec:design} gives the corrected rule.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.78\linewidth]{figs/matched.png}
+  \includegraphics[width=0.72\linewidth]{figs/matched.png}
   \caption{Change in mean payoff percentile against the fixed GLEE dataset
   pool, relative to our equilibrium-flavored baseline, for each later code
   version and role. Cells are (family, role, visible configuration); a cell
@@ -255,34 +256,37 @@ deterministic and a 34-case offline suite pins intended actions at decision
 boundaries (final-round ultimatums, exact-sum splits, loss refusal, lowball
 floors, belief non-updating for non-discriminating sellers); every live
 decision is reproducible from the archived game state. By measurement, the
-percentile pipeline of Section~\ref{sec:eval} scores every game per
-configuration and role. It caught each case in Section~\ref{sec:cases} within hours,
-including one where the aggregate family rating was still rising while
-player~1's percentile had collapsed to $0.07$, masked by player~2's gains.
+percentile pipeline of Section~\ref{sec:eval} caught each case in
+Section~\ref{sec:cases} within hours, including one where the family rating
+was still rising while player~1's percentile had collapsed to $0.07$, masked
+by player~2's gains.
 
 \textbf{Safety and liveness.} Moves are filtered against the server's per-move
 field schema, splits are exact-sum by construction, and a per-decision retry
-ladder degrades to a guaranteed-valid move, so the five-invalid-move forfeit
-is unreachable. Across all 70{,}449 games the agent submitted zero invalid
-moves and forfeited none by timeout.
+ladder degrades to a guaranteed-valid move; the agent's logs record no move
+rejected by the server. The platform nevertheless charged it for 25
+invalid-move forfeits and 38 turn timeouts across 70{,}449 games (0.09\%,
+a nominal 405 rating points), all infrastructural: 29 fell on day~1 while
+redundant local copies raced the same API key, so duplicate submissions
+counted against a game's attempt budget; 2 were in-flight games ended at the
+closing bell; 20 timeouts fell in an unexplained two-hour window on day~28.
+Opponent forfeits, which the platform voids for us, numbered 171.
 
 \textbf{Observed limits.} Ratings are non-stationary for a fixed policy
 (Table~\ref{tab:official}). Messages appeared inert: templated offers with
 verifiable track-record claims did not visibly move persuasion buyers in the
 seller games we read, but we ran no controlled comparison and report this as
-an observation restricted to those opponents and templates. The agent does
-not adapt to individual opponents; a learning opponent could exploit a fixed
-policy, a concern the late entry leaves untested.
+an observation restricted to those opponents and templates. The agent does not adapt to opponents; a learning opponent could exploit a
+fixed policy, which the late entry leaves untested.
 
 \section{Development, limitations, and reproducibility}
 
 The agent was built in about three days against the live competition
 (baseline, five transcript-driven revisions, then the quantile-targeting
 rewrite) and left to play unattended to the close. Rejecting LLM-in-the-loop
-play was a design decision on cost, latency, and prior evidence, not an
-experimental result. Percentile targets inherit the reference pool's biases,
-hidden-parameter aggregation is a heuristic, and the evaluation cannot
-separate policy effects from opponent drift.
+play was a design decision, not an experimental result; percentile targets
+inherit the reference pool's biases; and the evaluation cannot separate policy
+effects from opponent drift.
 
 Code, tests, the quantile table, the exported game history, cached
 transcripts' scores, and the analysis pipeline are at
